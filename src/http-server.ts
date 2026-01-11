@@ -5,6 +5,7 @@ import type { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { logger } from './utils/logger.js'
 
 const DEFAULT_PORT = 8787
+const MAX_JSON_BODY_BYTES = 4 * 1024 * 1024
 
 export interface HttpServerOptions {
   port?: number
@@ -12,6 +13,7 @@ export interface HttpServerOptions {
   ssePath?: string
   messagePath?: string
   healthPath?: string
+  jsonRpcHandler?: (message: unknown, clientId: string) => Promise<unknown | null>
 }
 
 export const startHttpServer = (mcpServer: Server, options: HttpServerOptions = {}) => {
@@ -23,6 +25,21 @@ export const startHttpServer = (mcpServer: Server, options: HttpServerOptions = 
 
   const transports = new Map<string, SSEServerTransport>()
 
+  const readJsonBody = async (req: http.IncomingMessage): Promise<unknown> => {
+    let total = 0
+    const chunks: Buffer[] = []
+    for await (const chunk of req) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      total += buffer.length
+      if (total > MAX_JSON_BODY_BYTES) {
+        throw new Error('Request body too large')
+      }
+      chunks.push(buffer)
+    }
+    const raw = Buffer.concat(chunks).toString('utf8')
+    return JSON.parse(raw)
+  }
+
   const server = http.createServer(async (req, res) => {
     if (!req.url) {
       res.writeHead(400).end('Bad Request')
@@ -32,6 +49,13 @@ export const startHttpServer = (mcpServer: Server, options: HttpServerOptions = 
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`)
+    logger.info('HTTP request', {
+      method: req.method,
+      path: url.pathname,
+      userAgent: req.headers['user-agent'],
+      accept: req.headers.accept,
+      contentType: req.headers['content-type'],
+    })
     if (req.method === 'OPTIONS') {
       res.writeHead(204).end()
       return
@@ -67,21 +91,55 @@ export const startHttpServer = (mcpServer: Server, options: HttpServerOptions = 
     }
     if (req.method === 'POST' && url.pathname === messagePath) {
       const sessionId = url.searchParams.get('sessionId')
-      if (!sessionId) {
-        res.writeHead(400).end('Missing sessionId')
-        return
+      if (sessionId) {
+        const transport = transports.get(sessionId)
+        if (transport) {
+          try {
+            await transport.handlePostMessage(req, res)
+          } catch (error) {
+            logger.error('Failed to handle POST message', { error: (error as Error).message })
+          }
+          return
+        }
       }
-      const transport = transports.get(sessionId)
-      if (!transport) {
-        res.writeHead(404).end('Unknown session')
+      if (options.jsonRpcHandler) {
+        try {
+          const payload = await readJsonBody(req)
+          const clientId = url.searchParams.get('clientId') ?? 'http'
+          const response = await options.jsonRpcHandler(payload, clientId)
+          if (response === null) {
+            res.writeHead(204).end()
+            return
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(response))
+          return
+        } catch (error) {
+          res.writeHead(400).end('Invalid JSON')
+          return
+        }
+      }
+      res.writeHead(404).end('Unknown session')
+      return
+    }
+    if (req.method === 'POST' && (url.pathname === '/' || url.pathname === ssePath)) {
+      if (!options.jsonRpcHandler) {
+        res.writeHead(404).end('Not Found')
         return
       }
       try {
-        await transport.handlePostMessage(req, res)
+        const payload = await readJsonBody(req)
+        const clientId = url.searchParams.get('clientId') ?? 'http'
+        const response = await options.jsonRpcHandler(payload, clientId)
+        if (response === null) {
+          res.writeHead(204).end()
+          return
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(response))
+        return
       } catch (error) {
-        logger.error('Failed to handle POST message', { error: (error as Error).message })
+        res.writeHead(400).end('Invalid JSON')
+        return
       }
-      return
     }
     res.writeHead(404).end('Not Found')
   })
