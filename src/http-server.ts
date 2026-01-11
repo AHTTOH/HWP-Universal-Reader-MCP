@@ -27,13 +27,30 @@ export const startHttpServer = (mcpServer: Server, options: HttpServerOptions = 
       res.writeHead(400).end('Bad Request')
       return
     }
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`)
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204).end()
+      return
+    }
     if (req.method === 'GET' && url.pathname === healthPath) {
       res.writeHead(200, { 'Content-Type': 'text/plain' }).end('ok')
       return
     }
     if (req.method === 'GET' && (url.pathname === ssePath || url.pathname === '/')) {
-      const transport = new SSEServerTransport(messagePath, res)
+      const forwardedProto = req.headers['x-forwarded-proto']
+      const forwardedHost = req.headers['x-forwarded-host']
+      const proto =
+        (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto) ??
+        (req.socket.encrypted ? 'https' : 'http')
+      const host =
+        (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost) ??
+        req.headers.host ??
+        'localhost'
+      const absoluteMessageUrl = new URL(messagePath, `${proto}://${host}`).toString()
+      const transport = new SSEServerTransport(absoluteMessageUrl, res)
       transports.set(transport.sessionId, transport)
       transport.onclose = () => {
         transports.delete(transport.sessionId)
