@@ -32,7 +32,7 @@ export const startHttpServer = (mcpServer: Server, options: HttpServerOptions = 
       res.writeHead(200, { 'Content-Type': 'text/plain' }).end('ok')
       return
     }
-    if (req.method === 'GET' && url.pathname === ssePath) {
+    if (req.method === 'GET' && (url.pathname === ssePath || url.pathname === '/')) {
       const transport = new SSEServerTransport(messagePath, res)
       transports.set(transport.sessionId, transport)
       transport.onclose = () => {
