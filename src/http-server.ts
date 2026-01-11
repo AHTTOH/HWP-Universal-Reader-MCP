@@ -1,4 +1,5 @@
 import http from 'node:http'
+import tls from 'node:tls'
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js'
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { logger } from './utils/logger.js'
@@ -42,9 +43,10 @@ export const startHttpServer = (mcpServer: Server, options: HttpServerOptions = 
     if (req.method === 'GET' && (url.pathname === ssePath || url.pathname === '/')) {
       const forwardedProto = req.headers['x-forwarded-proto']
       const forwardedHost = req.headers['x-forwarded-host']
+      const isTls = req.socket instanceof tls.TLSSocket && req.socket.encrypted
       const proto =
         (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto) ??
-        (req.socket.encrypted ? 'https' : 'http')
+        (isTls ? 'https' : 'http')
       const host =
         (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost) ??
         req.headers.host ??
