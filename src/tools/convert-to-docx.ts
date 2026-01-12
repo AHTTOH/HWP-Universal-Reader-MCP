@@ -75,6 +75,15 @@ const bufferToArrayBuffer = (buffer: Buffer): ArrayBuffer => {
   ) as ArrayBuffer
 }
 
+const escapeHtmlText = (value: string): string => {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
 const extractHwpxHtml = async (
   filePath: string,
 ): Promise<{ html: string; metadata: DocxMetadata }> => {
@@ -135,10 +144,8 @@ export const handleConvertToDocx = async (
     } else {
       const xmlResult = await parseHwpxXmlFile(fileInfo.path)
       const html = xmlResult.text
-        .split(/\r?\n+/)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0)
-        .map((line) => `<p>${line}</p>`)
+        .split(/\r?\n/)
+        .map((line) => `<p>${escapeHtmlText(line)}</p>`)
         .join('')
       htmlResult = {
         html,

@@ -150,6 +150,10 @@ MCP_TRANSPORT=http MCP_PORT=8787 node dist/index.js
 2. Set the command to `node /absolute/path/to/dist/index.js`.
 3. Provide a name and description, then register.
 
+Important:
+- Remote MCP servers cannot access files on your local machine. Use a local MCP server (Cursor/Claude Desktop) for local file paths.
+- PlayMCP uses a public endpoint, so files must be accessible to the server (uploaded or stored on the server).
+
 ![PlayMCP Tool Registration](images/playmcp.png)
 
 ### Cursor Setup

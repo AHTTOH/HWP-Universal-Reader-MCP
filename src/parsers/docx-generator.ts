@@ -202,10 +202,15 @@ const collectRuns = (nodes: HtmlNode[], style: TextStyle): TextRun[] => {
   const runs: TextRun[] = []
   for (const node of nodes) {
     if (node.type === 'text') {
-      const text = node.content
-      if (text.length > 0) {
-        runs.push({ text, ...style })
-      }
+      const parts = node.content.split(/\r?\n/)
+      parts.forEach((part, index) => {
+        if (index > 0) {
+          runs.push({ break: true, ...style })
+        }
+        if (part.length > 0) {
+          runs.push({ text: part, ...style })
+        }
+      })
       continue
     }
     const tag = node.tag
