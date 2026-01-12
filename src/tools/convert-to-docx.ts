@@ -1,4 +1,4 @@
-import fs from 'node:fs/promises'
+﻿import fs from 'node:fs/promises'
 import path from 'node:path'
 import {
   HwpConverter,
@@ -12,7 +12,6 @@ import {
   HWP_SIGNATURE,
   XML_SIGNATURE,
   readFileSignature,
-  validateFileAccess,
   validateOutputPath,
 } from '../validators/file-validator.js'
 import { parseHtmlToDocx, writeDocxFile } from '../parsers/docx-generator.js'
@@ -25,6 +24,7 @@ import { parseHwpxXmlFile } from '../parsers/hwpx-parser.js'
 import { parseHwpToDocx } from '../parsers/hwp-parser.js'
 import type { Sandbox } from '../security/sandbox.js'
 import type { RateLimiter } from '../security/rate-limiter.js'
+import { resolveInputFile } from '../utils/input-file.js'
 
 export const convertToDocxTool = {
   name: 'convert_to_docx',
@@ -36,12 +36,28 @@ export const convertToDocxTool = {
         type: 'string',
         description: 'Source HWP or HWPX file path',
       },
+      fileUrl: {
+        type: 'string',
+        description: 'Public URL to a HWP or HWPX file',
+      },
+      fileContentBase64: {
+        type: 'string',
+        description: 'Base64-encoded HWP or HWPX file content',
+      },
+      fileName: {
+        type: 'string',
+        description: 'Original file name (used for output naming)',
+      },
       outputPath: {
         type: 'string',
         description: 'Output DOCX file path',
       },
+      returnBase64: {
+        type: 'boolean',
+        description: 'Include base64-encoded DOCX in the response',
+      },
     },
-    required: ['filePath'],
+    required: [],
   },
 }
 
@@ -85,6 +101,25 @@ const escapeHtmlText = (value: string): string => {
     .replace(/'/g, '&#39;')
 }
 
+const resolveBaseName = (inputPath?: string, fileName?: string, fileUrl?: string): string => {
+  if (fileName) {
+    return path.basename(fileName, path.extname(fileName)) || 'document'
+  }
+  if (inputPath) {
+    return path.basename(inputPath, path.extname(inputPath)) || 'document'
+  }
+  if (fileUrl) {
+    try {
+      const url = new URL(fileUrl)
+      const base = path.basename(url.pathname || '')
+      return base ? path.basename(base, path.extname(base)) : 'document'
+    } catch {
+      return 'document'
+    }
+  }
+  return 'document'
+}
+
 const extractHwpxHtml = async (
   filePath: string,
 ): Promise<{ html: string; metadata: DocxMetadata }> => {
@@ -108,7 +143,7 @@ const extractHwpxHtml = async (
 
 const isPlaceholderHtml = (html: string): boolean => {
   const normalized = html.replace(/\s+/g, '').toLowerCase()
-  return normalized.includes('hwp파일') || normalized.includes('hwpfile')
+  return normalized.includes('hwpfile') || (normalized.includes('hwp') && normalized.length < 200)
 }
 
 export const handleConvertToDocx = async (
@@ -117,16 +152,19 @@ export const handleConvertToDocx = async (
 ): Promise<ConvertResult> => {
   deps.rateLimiter.check(deps.clientId)
   const parsed = parseInput(convertToDocxSchema, input)
-  const fileInfo = await validateFileAccess(parsed.filePath, deps.sandbox)
-  const fileType = await detectFileType(fileInfo.path)
-  const outputPathRaw =
-    parsed.outputPath ??
-    path.join(path.dirname(fileInfo.path), `${path.basename(fileInfo.path, path.extname(fileInfo.path))}.docx`)
-  const outputPath = validateOutputPath(outputPathRaw, deps.sandbox)
-  await fs.mkdir(path.dirname(outputPath), { recursive: true })
   const tempManager = new TempFileManager()
   try {
     checkMemory()
+    const inputFile = await resolveInputFile(parsed, deps.sandbox, tempManager)
+    const fileType = await detectFileType(inputFile.path)
+    const baseName = resolveBaseName(parsed.filePath, inputFile.fileName, parsed.fileUrl)
+    const outputPathRaw =
+      parsed.outputPath ??
+      (inputFile.source === 'path'
+        ? path.join(path.dirname(inputFile.path), `${baseName}.docx`)
+        : await tempManager.createTempFile('.docx'))
+    const outputPath = validateOutputPath(outputPathRaw, deps.sandbox)
+    await fs.mkdir(path.dirname(outputPath), { recursive: true })
     let htmlResult: { html: string; metadata: DocxMetadata } | undefined
     let docResult: { doc: ReturnType<typeof parseHtmlToDocx>; metadata: DocxMetadata } | null =
       null
@@ -135,25 +173,25 @@ export const handleConvertToDocx = async (
       const converter = new HwpConverter({ verbose: false })
       const available = await converter.isAvailable()
       if (!available) {
-        const fallback = await parseHwpToDocx(fileInfo.path)
+        const fallback = await parseHwpToDocx(inputFile.path)
         docResult = { doc: fallback.doc, metadata: fallback.metadata }
       } else {
-        const result = await converter.convertHwpToHwpx(fileInfo.path, tempHwpx)
+        const result = await converter.convertHwpToHwpx(inputFile.path, tempHwpx)
         if (!result.success || !result.outputPath) {
-          const fallback = await parseHwpToDocx(fileInfo.path)
+          const fallback = await parseHwpToDocx(inputFile.path)
           docResult = { doc: fallback.doc, metadata: fallback.metadata }
         } else {
           htmlResult = await extractHwpxHtml(result.outputPath)
           if (isPlaceholderHtml(htmlResult.html)) {
-            const fallback = await parseHwpToDocx(fileInfo.path)
+            const fallback = await parseHwpToDocx(inputFile.path)
             docResult = { doc: fallback.doc, metadata: fallback.metadata }
           }
         }
       }
     } else if (fileType === 'hwpx') {
-      htmlResult = await extractHwpxHtml(fileInfo.path)
+      htmlResult = await extractHwpxHtml(inputFile.path)
     } else {
-      const xmlResult = await parseHwpxXmlFile(fileInfo.path)
+      const xmlResult = await parseHwpxXmlFile(inputFile.path)
       const html = xmlResult.text
         .split(/\r?\n/)
         .map((line) => `<p>${escapeHtmlText(line)}</p>`)
@@ -178,11 +216,16 @@ export const handleConvertToDocx = async (
     }
     const finalPath = await writeDocxFile(outputPath, docResult.doc, docResult.metadata)
     const convertedStats = await fs.stat(finalPath)
+    const shouldReturnBase64 = parsed.returnBase64 ?? inputFile.source !== 'path'
+    const docxBase64 = shouldReturnBase64 ? (await fs.readFile(finalPath)).toString('base64') : undefined
+    const docxFileName = shouldReturnBase64 ? `${baseName}.docx` : undefined
     return {
       success: true,
       docxPath: finalPath,
-      originalSize: fileInfo.size,
+      originalSize: inputFile.size,
       convertedSize: convertedStats.size,
+      docxBase64,
+      docxFileName,
     }
   } catch (error) {
     if (error instanceof HwpxEncryptedDocumentError) {
@@ -203,3 +246,7 @@ export const handleConvertToDocx = async (
     await tempManager.cleanup()
   }
 }
+
+
+
+

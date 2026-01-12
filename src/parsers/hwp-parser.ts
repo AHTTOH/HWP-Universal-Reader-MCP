@@ -294,25 +294,77 @@ const normalizeTableRows = (rows: TableRow[]): TableRow[] => {
   return normalized
 }
 
+const toTwips = (value?: number): number | undefined => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return undefined
+  }
+  return Math.max(1, Math.round(value / 5))
+}
+
 const buildTableFromControl = (control: { content?: unknown }): TableBlock => {
   const table = control as {
-    content?: Array<Array<{ items?: HwpParagraph[]; attribute?: { colSpan?: number; rowSpan?: number } }>>
+    content?: Array<
+      Array<{
+        items?: HwpParagraph[]
+        attribute?: { colSpan?: number; rowSpan?: number; column?: number; row?: number; width?: number }
+      }>
+    >
+    columnCount?: number
   }
   const rows: TableRow[] = []
+  const columnCount = Number.isFinite(table.columnCount) ? (table.columnCount as number) : undefined
+  const columnWidths = columnCount ? new Array(columnCount).fill(0) : []
   for (const row of table.content ?? []) {
     const cells: TableCellBlock[] = []
+    let columnIndex = 0
     for (const cell of row ?? []) {
       const items = cell?.items ?? []
       const blocks = items.map(buildParagraphBlock)
+      const colSpanValue = cell?.attribute?.colSpan
+      const rowSpanValue = cell?.attribute?.rowSpan
+      const colSpan = colSpanValue && colSpanValue > 1 ? colSpanValue : undefined
+      const rowSpan = rowSpanValue && rowSpanValue > 1 ? rowSpanValue : undefined
+      const widthTwips = toTwips(cell?.attribute?.width)
+      const explicitColumn =
+        typeof cell?.attribute?.column === 'number' && cell.attribute.column >= 0
+          ? cell.attribute.column
+          : undefined
+      const effectiveCol = explicitColumn ?? columnIndex
+      if (widthTwips && columnWidths.length > 0) {
+        const span = colSpan ?? 1
+        const perCol = Math.max(1, Math.round(widthTwips / span))
+        for (let i = 0; i < span; i += 1) {
+          const target = effectiveCol + i
+          if (target >= 0 && target < columnWidths.length) {
+            columnWidths[target] = Math.max(columnWidths[target], perCol)
+          }
+        }
+      }
       cells.push({
         blocks: blocks.length > 0 ? blocks : [{ type: 'paragraph', runs: [{ text: '' }] }],
-        colSpan: cell?.attribute?.colSpan && cell.attribute.colSpan > 1 ? cell.attribute.colSpan : undefined,
-        rowSpan: cell?.attribute?.rowSpan && cell.attribute.rowSpan > 1 ? cell.attribute.rowSpan : undefined,
+        colSpan,
+        rowSpan,
+        widthTwips,
       })
+      columnIndex = effectiveCol + (colSpan ?? 1)
     }
     rows.push({ cells })
   }
-  return { type: 'table', rows: normalizeTableRows(rows) }
+  const hasWidths = columnWidths.some((width) => width > 0)
+  if (hasWidths) {
+    const maxWidth = Math.max(...columnWidths)
+    for (let i = 0; i < columnWidths.length; i += 1) {
+      if (!columnWidths[i] || columnWidths[i] <= 0) {
+        columnWidths[i] = maxWidth
+      }
+    }
+  }
+  return {
+    type: 'table',
+    rows: normalizeTableRows(rows),
+    columnWidths: hasWidths ? columnWidths : undefined,
+    hasBorders: true,
+  }
 }
 
 const buildBlocksFromParagraphs = (paragraphs: HwpParagraph[]): Array<ParagraphBlock> => {

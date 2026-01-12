@@ -488,6 +488,32 @@ const buildParagraphXml = (paragraph: ParagraphBlock): string => {
 }
 
 const buildTableXml = (table: TableBlock): string => {
+  const tblPrParts: string[] = []
+  if (table.columnWidths && table.columnWidths.length > 0) {
+    tblPrParts.push('<w:tblLayout w:type="fixed"/>')
+  }
+  if (table.hasBorders) {
+    tblPrParts.push(
+      '<w:tblBorders>' +
+        '<w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/>' +
+        '<w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/>' +
+        '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/>' +
+        '<w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/>' +
+        '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/>' +
+        '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/>' +
+        '</w:tblBorders>',
+    )
+  }
+  if (tblPrParts.length > 0) {
+    tblPrParts.unshift('<w:tblW w:w="0" w:type="auto"/>')
+  }
+  const tblPr = tblPrParts.length > 0 ? `<w:tblPr>${tblPrParts.join('')}</w:tblPr>` : ''
+  const tblGrid =
+    table.columnWidths && table.columnWidths.length > 0
+      ? `<w:tblGrid>${table.columnWidths
+          .map((width) => `<w:gridCol w:w="${Math.max(1, Math.round(width))}"/>`)
+          .join('')}</w:tblGrid>`
+      : ''
   const rowsXml = table.rows
     .map((row) => {
       const cellsXml = row.cells
@@ -502,6 +528,9 @@ const buildTableXml = (table: TableBlock): string => {
             } else if (cell.rowSpan === 0) {
               props.push('<w:vMerge/>')
             }
+          }
+          if (cell.widthTwips && Number.isFinite(cell.widthTwips)) {
+            props.push(`<w:tcW w:w="${Math.max(1, Math.round(cell.widthTwips))}" w:type="dxa"/>`)
           }
           const tcPr = props.length > 0 ? `<w:tcPr>${props.join('')}</w:tcPr>` : ''
           const blocks = cell.blocks.length > 0 ? cell.blocks : [EMPTY_PARAGRAPH]
@@ -522,7 +551,7 @@ const buildTableXml = (table: TableBlock): string => {
       return `<w:tr>${cellsXml}</w:tr>`
     })
     .join('')
-  return `<w:tbl>${rowsXml}</w:tbl>`
+  return `<w:tbl>${tblPr}${tblGrid}${rowsXml}</w:tbl>`
 }
 
 const buildDocumentXml = (doc: DocxDocument): string => {

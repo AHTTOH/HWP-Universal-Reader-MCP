@@ -27,6 +27,8 @@ export interface ConvertResult {
   docxPath: string
   originalSize: number
   convertedSize: number
+  docxBase64?: string
+  docxFileName?: string
 }
 
 export type ParagraphAlign = 'left' | 'center' | 'right' | 'justify'
@@ -57,6 +59,7 @@ export interface TableCellBlock {
   blocks: Block[]
   colSpan?: number
   rowSpan?: number
+  widthTwips?: number
 }
 
 export interface TableRow {
@@ -66,6 +69,8 @@ export interface TableRow {
 export interface TableBlock {
   type: 'table'
   rows: TableRow[]
+  columnWidths?: number[]
+  hasBorders?: boolean
 }
 
 export type Block = ParagraphBlock | TableBlock

@@ -32,6 +32,7 @@ MCP_TRANSPORT=http MCP_PORT=8787 node dist/index.js
 1. ChatGPT 설정에서 MCP Connector 추가를 선택합니다.
 2. 실행 명령에 `node /absolute/path/to/dist/index.js`를 입력합니다.
 3. 저장 후 새 대화에서 `read_hwp`, `read_hwpx`, `convert_to_docx`를 호출합니다.
+4. 파일 업로드만 사용하는 경우 `fileContentBase64` 또는 `fileUrl`을 전달합니다.
 
 ![ChatGPT Connector Setup](images/chatgpt-connector.png)
 
@@ -60,6 +61,10 @@ MCP_TRANSPORT=http MCP_PORT=8787 node dist/index.js
 1. PlayMCP 도구 등록 화면에서 로컬 MCP 서버를 선택합니다.
 2. 실행 명령에 `node /absolute/path/to/dist/index.js`를 입력합니다.
 3. 도구 이름과 설명을 입력한 뒤 등록합니다.
+
+중요:
+- 원격 MCP 서버는 로컬 파일 경로에 접근할 수 없습니다.
+- PlayMCP에서는 `fileUrl` 또는 `fileContentBase64` 입력을 사용해야 합니다.
 
 ![PlayMCP Tool Registration](images/playmcp.png)
 
@@ -121,6 +126,7 @@ MCP_TRANSPORT=http MCP_PORT=8787 node dist/index.js
 1. Add a new MCP Connector in ChatGPT settings.
 2. Set the command to `node /absolute/path/to/dist/index.js`.
 3. Save and use `read_hwp`, `read_hwpx`, or `convert_to_docx`.
+4. For uploads, pass `fileContentBase64` or `fileUrl` instead of local paths.
 
 ![ChatGPT Connector Setup](images/chatgpt-connector.png)
 
@@ -152,7 +158,7 @@ MCP_TRANSPORT=http MCP_PORT=8787 node dist/index.js
 
 Important:
 - Remote MCP servers cannot access files on your local machine. Use a local MCP server (Cursor/Claude Desktop) for local file paths.
-- PlayMCP uses a public endpoint, so files must be accessible to the server (uploaded or stored on the server).
+- PlayMCP uses a public endpoint, so use `fileUrl` or `fileContentBase64` for uploads.
 
 ![PlayMCP Tool Registration](images/playmcp.png)
 

@@ -4,7 +4,6 @@ import {
   HWPX_SIGNATURE,
   XML_SIGNATURE,
   readFileSignature,
-  validateFileAccess,
 } from '../validators/file-validator.js'
 import { parseHwpFile } from '../parsers/hwp-parser.js'
 import { parseHwpxFile, parseHwpxXmlFile } from '../parsers/hwpx-parser.js'
@@ -13,6 +12,8 @@ import type { ReadResult } from '../types/index.js'
 import { HwpError } from '../utils/error-handler.js'
 import type { Sandbox } from '../security/sandbox.js'
 import type { RateLimiter } from '../security/rate-limiter.js'
+import { TempFileManager } from '../utils/file-cleanup.js'
+import { resolveInputFile } from '../utils/input-file.js'
 
 export const readHwpTool = {
   name: 'read_hwp',
@@ -25,8 +26,20 @@ export const readHwpTool = {
         type: 'string',
         description: 'Absolute path to a .hwp file',
       },
+      fileUrl: {
+        type: 'string',
+        description: 'Public URL to a .hwp file',
+      },
+      fileContentBase64: {
+        type: 'string',
+        description: 'Base64-encoded HWP file content',
+      },
+      fileName: {
+        type: 'string',
+        description: 'Original file name (used for display/output naming)',
+      },
     },
-    required: ['filePath'],
+    required: [],
   },
 }
 
@@ -39,31 +52,36 @@ interface ToolDeps {
 export const handleReadHwp = async (input: unknown, deps: ToolDeps): Promise<ReadResult> => {
   deps.rateLimiter.check(deps.clientId)
   const parsed = parseInput(readHwpSchema, input)
-  const fileInfo = await validateFileAccess(parsed.filePath, deps.sandbox)
-  const signature = await readFileSignature(fileInfo.path, 4)
-  if (signature.equals(HWP_SIGNATURE)) {
-    const result = await parseHwpFile(fileInfo.path)
-    return {
-      text: result.text,
-      metadata: result.metadata,
+  const tempManager = new TempFileManager()
+  try {
+    const fileInfo = await resolveInputFile(parsed, deps.sandbox, tempManager)
+    const signature = await readFileSignature(fileInfo.path, 4)
+    if (signature.equals(HWP_SIGNATURE)) {
+      const result = await parseHwpFile(fileInfo.path)
+      return {
+        text: result.text,
+        metadata: result.metadata,
+      }
     }
-  }
-  if (signature.equals(HWPX_SIGNATURE)) {
-    const result = await parseHwpxFile(fileInfo.path)
-    return {
-      text: result.text,
-      metadata: result.metadata,
+    if (signature.equals(HWPX_SIGNATURE)) {
+      const result = await parseHwpxFile(fileInfo.path)
+      return {
+        text: result.text,
+        metadata: result.metadata,
+      }
     }
-  }
-  if (signature.equals(XML_SIGNATURE)) {
-    const result = await parseHwpxXmlFile(fileInfo.path)
-    return {
-      text: result.text,
-      metadata: result.metadata,
+    if (signature.equals(XML_SIGNATURE)) {
+      const result = await parseHwpxXmlFile(fileInfo.path)
+      return {
+        text: result.text,
+        metadata: result.metadata,
+      }
     }
+    throw new HwpError(ErrorCode.CORRUPTED, 'Unsupported file signature', {
+      filePath: fileInfo.path,
+      signature: signature.toString('hex'),
+    })
+  } finally {
+    await tempManager.cleanup()
   }
-  throw new HwpError(ErrorCode.CORRUPTED, 'Unsupported file signature', {
-    filePath: fileInfo.path,
-    signature: signature.toString('hex'),
-  })
 }

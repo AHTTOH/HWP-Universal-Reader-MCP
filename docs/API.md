@@ -10,7 +10,10 @@ Extracts all text and metadata from HWP 5.0+ files.
 
 ```json
 {
-  "filePath": "/absolute/path/to/document.hwp"
+  "filePath": "/absolute/path/to/document.hwp",
+  "fileUrl": "https://example.com/document.hwp",
+  "fileContentBase64": "BASE64_DATA",
+  "fileName": "document.hwp"
 }
 ```
 
@@ -36,7 +39,10 @@ Extracts text and metadata from HWPX files.
 
 ```json
 {
-  "filePath": "/absolute/path/to/document.hwpx"
+  "filePath": "/absolute/path/to/document.hwpx",
+  "fileUrl": "https://example.com/document.hwpx",
+  "fileContentBase64": "BASE64_DATA",
+  "fileName": "document.hwpx"
 }
 ```
 
@@ -63,7 +69,11 @@ Converts HWP or HWPX to DOCX.
 ```json
 {
   "filePath": "/absolute/path/to/document.hwp",
-  "outputPath": "/absolute/path/to/output.docx"
+  "fileUrl": "https://example.com/document.hwp",
+  "fileContentBase64": "BASE64_DATA",
+  "fileName": "document.hwp",
+  "outputPath": "/absolute/path/to/output.docx",
+  "returnBase64": true
 }
 ```
 
@@ -74,7 +84,9 @@ Converts HWP or HWPX to DOCX.
   "success": true,
   "docxPath": "/absolute/path/to/output.docx",
   "originalSize": 1048576,
-  "convertedSize": 2048000
+  "convertedSize": 2048000,
+  "docxBase64": "BASE64_DOCX",
+  "docxFileName": "document.docx"
 }
 ```
 
