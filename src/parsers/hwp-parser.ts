@@ -190,7 +190,7 @@ const extractParagraphText = (paragraph: HwpParagraph): string => {
   let text = ''
   for (const char of paragraph.content) {
     if (typeof char.value === 'string') {
-      text += char.value
+      text += normalizeHwpText(char.value)
       continue
     }
     if (typeof char.value === 'number') {
@@ -202,6 +202,10 @@ const extractParagraphText = (paragraph: HwpParagraph): string => {
   return text
 }
 
+const normalizeHwpText = (value: string): string => {
+  return value.replace(/\u20de/g, '□')
+}
+
 const buildRunsFromParagraph = (paragraph: HwpParagraph): TextRun[] => {
   const runs: TextRun[] = []
   if (!paragraph.content || paragraph.content.length === 0) {
@@ -210,7 +214,7 @@ const buildRunsFromParagraph = (paragraph: HwpParagraph): TextRun[] => {
   let buffer = ''
   for (const char of paragraph.content) {
     if (typeof char.value === 'string') {
-      buffer += char.value
+      buffer += normalizeHwpText(char.value)
       continue
     }
     if (typeof char.value === 'number' && (char.value === 10 || char.value === 13)) {
