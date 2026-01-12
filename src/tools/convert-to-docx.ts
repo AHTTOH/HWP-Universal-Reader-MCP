@@ -22,6 +22,7 @@ import { ErrorCode } from '../types/index.js'
 import type { ConvertResult, DocxMetadata } from '../types/index.js'
 import { HwpError } from '../utils/error-handler.js'
 import { parseHwpxXmlFile } from '../parsers/hwpx-parser.js'
+import { parseHwpToDocx } from '../parsers/hwp-parser.js'
 import type { Sandbox } from '../security/sandbox.js'
 import type { RateLimiter } from '../security/rate-limiter.js'
 
@@ -105,6 +106,11 @@ const extractHwpxHtml = async (
   }
 }
 
+const isPlaceholderHtml = (html: string): boolean => {
+  const normalized = html.replace(/\s+/g, '').toLowerCase()
+  return normalized.includes('hwp파일') || normalized.includes('hwpfile')
+}
+
 export const handleConvertToDocx = async (
   input: unknown,
   deps: ToolDeps,
@@ -121,24 +127,29 @@ export const handleConvertToDocx = async (
   const tempManager = new TempFileManager()
   try {
     checkMemory()
-    let htmlResult: { html: string; metadata: DocxMetadata }
+    let htmlResult: { html: string; metadata: DocxMetadata } | undefined
+    let docResult: { doc: ReturnType<typeof parseHtmlToDocx>; metadata: DocxMetadata } | null =
+      null
     if (fileType === 'hwp') {
       const tempHwpx = await tempManager.createTempFile('.hwpx')
       const converter = new HwpConverter({ verbose: false })
       const available = await converter.isAvailable()
       if (!available) {
-        throw new HwpError(
-          ErrorCode.CONVERSION_ERROR,
-          'HWP converter is not available in this environment',
-        )
+        const fallback = await parseHwpToDocx(fileInfo.path)
+        docResult = { doc: fallback.doc, metadata: fallback.metadata }
+      } else {
+        const result = await converter.convertHwpToHwpx(fileInfo.path, tempHwpx)
+        if (!result.success || !result.outputPath) {
+          const fallback = await parseHwpToDocx(fileInfo.path)
+          docResult = { doc: fallback.doc, metadata: fallback.metadata }
+        } else {
+          htmlResult = await extractHwpxHtml(result.outputPath)
+          if (isPlaceholderHtml(htmlResult.html)) {
+            const fallback = await parseHwpToDocx(fileInfo.path)
+            docResult = { doc: fallback.doc, metadata: fallback.metadata }
+          }
+        }
       }
-      const result = await converter.convertHwpToHwpx(fileInfo.path, tempHwpx)
-      if (!result.success || !result.outputPath) {
-        throw new HwpError(ErrorCode.CONVERSION_ERROR, 'Failed to convert HWP to HWPX', {
-          cause: result.error ?? 'Unknown conversion error',
-        })
-      }
-      htmlResult = await extractHwpxHtml(result.outputPath)
     } else if (fileType === 'hwpx') {
       htmlResult = await extractHwpxHtml(fileInfo.path)
     } else {
@@ -156,8 +167,16 @@ export const handleConvertToDocx = async (
         },
       }
     }
-    const doc = parseHtmlToDocx(htmlResult.html)
-    const finalPath = await writeDocxFile(outputPath, doc, htmlResult.metadata)
+    if (!docResult) {
+      if (!htmlResult) {
+        throw new HwpError(ErrorCode.CONVERSION_ERROR, 'No conversion output available')
+      }
+      docResult = {
+        doc: parseHtmlToDocx(htmlResult.html),
+        metadata: htmlResult.metadata,
+      }
+    }
+    const finalPath = await writeDocxFile(outputPath, docResult.doc, docResult.metadata)
     const convertedStats = await fs.stat(finalPath)
     return {
       success: true,

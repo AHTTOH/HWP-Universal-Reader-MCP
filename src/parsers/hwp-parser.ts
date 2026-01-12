@@ -21,7 +21,16 @@ const OtherCtrlID = {
 import { read, find } from 'cfb'
 import iconv from 'iconv-lite'
 import { ErrorCode } from '../types/index.js'
-import type { HwpMetadata } from '../types/index.js'
+import type {
+  DocxDocument,
+  DocxMetadata,
+  ParagraphBlock,
+  TableBlock,
+  TableCellBlock,
+  TableRow,
+  TextRun,
+  HwpMetadata,
+} from '../types/index.js'
 import { HwpError } from '../utils/error-handler.js'
 import { checkMemory } from '../utils/memory.js'
 
@@ -191,6 +200,123 @@ const extractParagraphText = (paragraph: HwpParagraph): string => {
     }
   }
   return text
+}
+
+const buildRunsFromParagraph = (paragraph: HwpParagraph): TextRun[] => {
+  const runs: TextRun[] = []
+  if (!paragraph.content || paragraph.content.length === 0) {
+    return [{ text: '' }]
+  }
+  let buffer = ''
+  for (const char of paragraph.content) {
+    if (typeof char.value === 'string') {
+      buffer += char.value
+      continue
+    }
+    if (typeof char.value === 'number' && (char.value === 10 || char.value === 13)) {
+      if (buffer.length > 0) {
+        runs.push({ text: buffer })
+        buffer = ''
+      }
+      runs.push({ break: true })
+    }
+  }
+  if (buffer.length > 0) {
+    runs.push({ text: buffer })
+  }
+  return runs.length > 0 ? runs : [{ text: '' }]
+}
+
+const buildParagraphBlock = (paragraph: HwpParagraph): ParagraphBlock => {
+  return {
+    type: 'paragraph',
+    runs: buildRunsFromParagraph(paragraph),
+  }
+}
+
+type GridSlot =
+  | { kind: 'cell'; cell: TableCellBlock; colSpan: number; rowSpan: number }
+  | { kind: 'vmerge'; colSpan: number }
+  | { kind: 'skip' }
+
+const normalizeTableRows = (rows: TableRow[]): TableRow[] => {
+  const grid: GridSlot[][] = []
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex]
+    if (!grid[rowIndex]) {
+      grid[rowIndex] = []
+    }
+    let colIndex = 0
+    for (const cell of row.cells) {
+      while (grid[rowIndex][colIndex]) {
+        colIndex += 1
+      }
+      const colSpan = cell.colSpan ?? 1
+      const rowSpan = cell.rowSpan ?? 1
+      grid[rowIndex][colIndex] = { kind: 'cell', cell, colSpan, rowSpan }
+      for (let c = 1; c < colSpan; c += 1) {
+        grid[rowIndex][colIndex + c] = { kind: 'skip' }
+      }
+      for (let r = 1; r < rowSpan; r += 1) {
+        if (!grid[rowIndex + r]) {
+          grid[rowIndex + r] = []
+        }
+        for (let c = 0; c < colSpan; c += 1) {
+          grid[rowIndex + r][colIndex + c] = { kind: 'vmerge', colSpan }
+        }
+      }
+      colIndex += colSpan
+    }
+  }
+  const normalized: TableRow[] = []
+  for (const rowSlots of grid) {
+    const cells: TableCellBlock[] = []
+    for (const slot of rowSlots) {
+      if (!slot || slot.kind === 'skip') {
+        continue
+      }
+      if (slot.kind === 'vmerge') {
+        cells.push({
+          blocks: [],
+          colSpan: slot.colSpan > 1 ? slot.colSpan : undefined,
+          rowSpan: 0,
+        })
+      } else if (slot.kind === 'cell') {
+        cells.push({
+          blocks: slot.cell.blocks,
+          colSpan: slot.colSpan > 1 ? slot.colSpan : undefined,
+          rowSpan: slot.rowSpan > 1 ? slot.rowSpan : undefined,
+        })
+      }
+    }
+    normalized.push({ cells })
+  }
+  return normalized
+}
+
+const buildTableFromControl = (control: { content?: unknown }): TableBlock => {
+  const table = control as {
+    content?: Array<Array<{ items?: HwpParagraph[]; attribute?: { colSpan?: number; rowSpan?: number } }>>
+  }
+  const rows: TableRow[] = []
+  for (const row of table.content ?? []) {
+    const cells: TableCellBlock[] = []
+    for (const cell of row ?? []) {
+      const items = cell?.items ?? []
+      const blocks = items.map(buildParagraphBlock)
+      cells.push({
+        blocks: blocks.length > 0 ? blocks : [{ type: 'paragraph', runs: [{ text: '' }] }],
+        colSpan: cell?.attribute?.colSpan && cell.attribute.colSpan > 1 ? cell.attribute.colSpan : undefined,
+        rowSpan: cell?.attribute?.rowSpan && cell.attribute.rowSpan > 1 ? cell.attribute.rowSpan : undefined,
+      })
+    }
+    rows.push({ cells })
+  }
+  return { type: 'table', rows: normalizeTableRows(rows) }
+}
+
+const buildBlocksFromParagraphs = (paragraphs: HwpParagraph[]): Array<ParagraphBlock> => {
+  return paragraphs.map(buildParagraphBlock)
 }
 
 const extractTableText = (control: { content?: unknown }): string => {
@@ -370,5 +496,54 @@ export const streamHwpText = async function* (
     if (sectionText.length > 0) {
       yield sectionText
     }
+  }
+}
+
+export const parseHwpToDocx = async (
+  filePath: string,
+): Promise<{ doc: DocxDocument; metadata: DocxMetadata }> => {
+  checkMemory()
+  const buffer = await fs.readFile(filePath)
+  checkMemory()
+  let document: HwpDocument
+  try {
+    document = parse(buffer, { type: 'buffer' }) as unknown as HwpDocument
+  } catch (error) {
+    throw mapHwpParseError(error as Error)
+  }
+  if (document.header?.properties?.encrypted) {
+    throw new HwpError(ErrorCode.ENCRYPTED, 'Encrypted HWP files are not supported')
+  }
+  const summary = extractSummaryInfo(buffer)
+  const metadata: DocxMetadata = {
+    title: summary.title,
+    author: summary.author,
+    pages: summary.pages,
+  }
+  const blocks: Array<ParagraphBlock | TableBlock> = []
+  for (const section of document.sections ?? []) {
+    for (const paragraph of section.content ?? []) {
+      blocks.push(buildParagraphBlock(paragraph))
+      for (const control of paragraph.controls ?? []) {
+        if (control?.id === CommonCtrlID.Table) {
+          blocks.push(buildTableFromControl(control))
+          continue
+        }
+        if (
+          control?.id === OtherCtrlID.Header ||
+          control?.id === OtherCtrlID.Footer ||
+          control?.id === OtherCtrlID.Footnote ||
+          control?.id === OtherCtrlID.Endnote
+        ) {
+          const paragraphs: HwpParagraph[] = []
+          collectParagraphs(control, paragraphs)
+          blocks.push(...buildBlocksFromParagraphs(paragraphs))
+        }
+      }
+    }
+  }
+  return {
+    doc: { blocks },
+    metadata,
   }
 }
