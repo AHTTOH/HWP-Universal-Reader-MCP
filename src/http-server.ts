@@ -61,7 +61,13 @@ export const startHttpServer = (mcpServer: Server, options: HttpServerOptions = 
       return
     }
     if (req.method === 'GET' && url.pathname === healthPath) {
-      res.writeHead(200, { 'Content-Type': 'text/plain' }).end('ok')
+      const healthResponse = {
+        status: 'ok',
+        service: 'hwp-mcp-server',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(healthResponse))
       return
     }
     if (req.method === 'GET' && (url.pathname === ssePath || url.pathname === '/')) {
