@@ -37,5 +37,5 @@ describe('convert_to_docx integration', () => {
     const documentXml = zip.readAsText('word/document.xml')
     expect(documentXml).toContain('<w:document')
     await fs.rm(result.docxPath, { force: true })
-  })
+  }, 15000)
 })

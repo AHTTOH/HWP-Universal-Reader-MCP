@@ -12,6 +12,12 @@
 - Update `HWP_MCP_ALLOWED_DIRS` to include the required directory.
 - Verify file permissions for the current user.
 
+## BRIDGE_MODE
+
+- When running with `HWP_MCP_MODE=bridge`, set `HWP_MCP_REMOTE_URL`.
+- If the remote URL points to `/sse`, it will be rewritten to `/message`.
+- Ensure the local file path is inside `HWP_MCP_ALLOWED_DIRS`.
+
 ## FILE_TOO_LARGE
 
 - Files larger than 100MB are blocked.

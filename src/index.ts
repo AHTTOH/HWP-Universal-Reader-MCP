@@ -11,14 +11,42 @@ import { readHwpxTool, handleReadHwpx } from './tools/read-hwpx.js'
 import { convertToDocxTool, handleConvertToDocx } from './tools/convert-to-docx.js'
 import { Sandbox } from './security/sandbox.js'
 import { RateLimiter } from './security/rate-limiter.js'
-import { formatError, normalizeError } from './utils/error-handler.js'
+import { ErrorCode } from './types/index.js'
+import { HwpError, formatError, normalizeError } from './utils/error-handler.js'
 import { logger } from './utils/logger.js'
 import { startHttpServer } from './http-server.js'
+import { createRemoteClient, type RemoteClient } from './bridge/remote-client.js'
+import {
+  handleBridgeConvertToDocx,
+  handleBridgeReadHwp,
+  handleBridgeReadHwpx,
+} from './bridge/bridge-handlers.js'
 
 const sandbox = Sandbox.fromEnv()
 const rateLimiter = new RateLimiter({ windowMs: 60_000, max: 30 })
 const SERVER_INFO = { name: 'hwp-mcp-server', version: '1.0.0' }
 const SERVER_CAPABILITIES = { tools: {} }
+const serverMode = process.argv.includes('--bridge') || process.env.HWP_MCP_MODE === 'bridge'
+  ? 'bridge'
+  : 'server'
+let bridgeRemote: RemoteClient | null = null
+
+const getBridgeRemote = (): RemoteClient => {
+  if (bridgeRemote) {
+    return bridgeRemote
+  }
+  const remoteUrl = process.env.HWP_MCP_REMOTE_URL
+  if (!remoteUrl || remoteUrl.trim().length === 0) {
+    throw new HwpError(
+      ErrorCode.PARSE_ERROR,
+      'HWP_MCP_REMOTE_URL is required when running in bridge mode',
+    )
+  }
+  const timeoutValue = Number(process.env.HWP_MCP_REMOTE_TIMEOUT_MS)
+  const timeoutMs = Number.isFinite(timeoutValue) && timeoutValue > 0 ? timeoutValue : undefined
+  bridgeRemote = createRemoteClient(remoteUrl, timeoutMs ? { timeoutMs } : {})
+  return bridgeRemote
+}
 
 const server = new Server(SERVER_INFO, {
   capabilities: SERVER_CAPABILITIES,
@@ -38,27 +66,51 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const clientId = meta?.clientId ?? 'local'
   try {
     if (name === readHwpTool.name) {
-      const result = await handleReadHwp(request.params.arguments, {
-        sandbox,
-        rateLimiter,
-        clientId,
-      })
+      const result =
+        serverMode === 'bridge'
+          ? await handleBridgeReadHwp(request.params.arguments, {
+              sandbox,
+              rateLimiter,
+              clientId,
+              remote: getBridgeRemote(),
+            })
+          : await handleReadHwp(request.params.arguments, {
+              sandbox,
+              rateLimiter,
+              clientId,
+            })
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
     }
     if (name === readHwpxTool.name) {
-      const result = await handleReadHwpx(request.params.arguments, {
-        sandbox,
-        rateLimiter,
-        clientId,
-      })
+      const result =
+        serverMode === 'bridge'
+          ? await handleBridgeReadHwpx(request.params.arguments, {
+              sandbox,
+              rateLimiter,
+              clientId,
+              remote: getBridgeRemote(),
+            })
+          : await handleReadHwpx(request.params.arguments, {
+              sandbox,
+              rateLimiter,
+              clientId,
+            })
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
     }
     if (name === convertToDocxTool.name) {
-      const result = await handleConvertToDocx(request.params.arguments, {
-        sandbox,
-        rateLimiter,
-        clientId,
-      })
+      const result =
+        serverMode === 'bridge'
+          ? await handleBridgeConvertToDocx(request.params.arguments, {
+              sandbox,
+              rateLimiter,
+              clientId,
+              remote: getBridgeRemote(),
+            })
+          : await handleConvertToDocx(request.params.arguments, {
+              sandbox,
+              rateLimiter,
+              clientId,
+            })
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
     }
     return {
@@ -141,7 +193,15 @@ const run = async () => {
           const toolName = params.name
           const toolArgs = params.arguments
           if (toolName === readHwpTool.name) {
-            const result = await handleReadHwp(toolArgs, { sandbox, rateLimiter, clientId })
+            const result =
+              serverMode === 'bridge'
+                ? await handleBridgeReadHwp(toolArgs, {
+                    sandbox,
+                    rateLimiter,
+                    clientId,
+                    remote: getBridgeRemote(),
+                  })
+                : await handleReadHwp(toolArgs, { sandbox, rateLimiter, clientId })
             return {
               jsonrpc: '2.0',
               id: id ?? null,
@@ -149,7 +209,15 @@ const run = async () => {
             }
           }
           if (toolName === readHwpxTool.name) {
-            const result = await handleReadHwpx(toolArgs, { sandbox, rateLimiter, clientId })
+            const result =
+              serverMode === 'bridge'
+                ? await handleBridgeReadHwpx(toolArgs, {
+                    sandbox,
+                    rateLimiter,
+                    clientId,
+                    remote: getBridgeRemote(),
+                  })
+                : await handleReadHwpx(toolArgs, { sandbox, rateLimiter, clientId })
             return {
               jsonrpc: '2.0',
               id: id ?? null,
@@ -157,7 +225,15 @@ const run = async () => {
             }
           }
           if (toolName === convertToDocxTool.name) {
-            const result = await handleConvertToDocx(toolArgs, { sandbox, rateLimiter, clientId })
+            const result =
+              serverMode === 'bridge'
+                ? await handleBridgeConvertToDocx(toolArgs, {
+                    sandbox,
+                    rateLimiter,
+                    clientId,
+                    remote: getBridgeRemote(),
+                  })
+                : await handleConvertToDocx(toolArgs, { sandbox, rateLimiter, clientId })
             return {
               jsonrpc: '2.0',
               id: id ?? null,
@@ -191,13 +267,13 @@ const run = async () => {
     }
 
     startHttpServer(server, { port, jsonRpcHandler: handleJsonRpc })
-    logger.info('HWP MCP server started', { transport: 'http', port })
+    logger.info('HWP MCP server started', { transport: 'http', port, mode: serverMode })
     return
   }
 
   const transport = new StdioServerTransport()
   await server.connect(transport)
-  logger.info('HWP MCP server started', { transport: 'stdio' })
+  logger.info('HWP MCP server started', { transport: 'stdio', mode: serverMode })
 }
 
 run().catch((error) => {

@@ -86,6 +86,27 @@ MCP_TRANSPORT=http MCP_PORT=8787 node dist/index.js
 
 ![Cursor MCP Setup](images/cursor-mcp.png)
 
+### 로컬 브리지 모드 (로컬 파일 자동 처리)
+
+Render 같은 원격 MCP를 사용하면서 로컬 파일 경로를 그대로 쓰려면 브리지 모드로 실행합니다.
+
+```json
+{
+  "mcpServers": {
+    "hwp-bridge": {
+      "command": "node",
+      "args": ["/absolute/path/to/dist/index.js", "--bridge"],
+      "env": {
+        "HWP_MCP_REMOTE_URL": "https://hwp-universal-reader-mcp.onrender.com/message"
+      }
+    }
+  }
+}
+```
+
+- `HWP_MCP_REMOTE_URL`에 `/sse`를 넣어도 자동으로 `/message`로 변환됩니다.
+- 브리지 모드에서는 `filePath` 입력이 로컬에서 처리되고, 원격 MCP에는 Base64로 전달됩니다.
+
 ### 주요 사용 예시
 
 ```text
@@ -179,6 +200,27 @@ Important:
 ```
 
 ![Cursor MCP Setup](images/cursor-mcp.png)
+
+### Bridge Mode (Local file access)
+
+Run the MCP in bridge mode to read local file paths and forward them to a remote MCP server.
+
+```json
+{
+  "mcpServers": {
+    "hwp-bridge": {
+      "command": "node",
+      "args": ["/absolute/path/to/dist/index.js", "--bridge"],
+      "env": {
+        "HWP_MCP_REMOTE_URL": "https://hwp-universal-reader-mcp.onrender.com/message"
+      }
+    }
+  }
+}
+```
+
+- `/sse` URLs are automatically rewritten to `/message`.
+- In bridge mode, local `filePath` inputs are converted to Base64 and sent to the remote MCP.
 
 ### Example Usage
 
