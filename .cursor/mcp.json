@@ -1,0 +1,11 @@
+﻿{
+  "mcpServers": {
+    "hwp-universal-reader": {
+      "command": "node",
+      "args": ["C:\\Users\\A\\HWP-Universal-Reader-MCP\\dist\\index.js"],
+      "env": {
+        "HWP_MCP_ALLOWED_DIRS": "C:\\Users\\A\\HWP-Universal-Reader-MCP,C:\\Users\\A"
+      }
+    }
+  }
+}
