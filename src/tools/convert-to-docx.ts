@@ -119,6 +119,11 @@ const resolveBaseName = (inputPath?: string, fileName?: string, fileUrl?: string
   return 'document'
 }
 
+const isPlaceholderHtml = (html: string): boolean => {
+  const normalized = html.replace(/\s+/g, '').toLowerCase()
+  return normalized.includes('hwpfile') || (normalized.includes('hwp') && normalized.length < 200)
+}
+
 const extractHwpxHtml = async (
   filePath: string,
 ): Promise<{ html: string; metadata: DocxMetadata }> => {
@@ -129,6 +134,9 @@ const extractHwpxHtml = async (
     reader.extractHtml({ renderStyles: true, renderTables: true, renderImages: false }),
     reader.getDocumentInfo(),
   ])
+  if (isPlaceholderHtml(html)) {
+    throw new HwpError(ErrorCode.CONVERSION_ERROR, 'Failed to extract content from HWPX file - placeholder HTML detected')
+  }
   const pages = info.summary.contentsFiles.length > 0 ? info.summary.contentsFiles.length : undefined
   return {
     html,
