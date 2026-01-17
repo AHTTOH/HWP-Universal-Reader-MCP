@@ -30,10 +30,6 @@ interface TextStyle {
   size?: number
 }
 
-const EMPTY_PARAGRAPH: ParagraphBlock = {
-  type: 'paragraph',
-  runs: [{ text: '' }],
-}
 
 interface DocxStructure {
   document: string
@@ -421,8 +417,11 @@ const buildBlocks = (nodes: HtmlNode[]): Block[] => {
 export const parseHtmlToDocx = (html: string): DocxDocument => {
   const nodes = parseHtml(html)
   const blocks = buildBlocks(nodes)
+  if (blocks.length === 0) {
+    throw new Error('No content extracted from HTML - empty document')
+  }
   return {
-    blocks: blocks.length > 0 ? blocks : [EMPTY_PARAGRAPH],
+    blocks,
   }
 }
 
@@ -533,7 +532,10 @@ const buildTableXml = (table: TableBlock): string => {
             props.push(`<w:tcW w:w="${Math.max(1, Math.round(cell.widthTwips))}" w:type="dxa"/>`)
           }
           const tcPr = props.length > 0 ? `<w:tcPr>${props.join('')}</w:tcPr>` : ''
-          const blocks = cell.blocks.length > 0 ? cell.blocks : [EMPTY_PARAGRAPH]
+          if (cell.blocks.length === 0) {
+            throw new Error('Empty table cell - no content')
+          }
+          const blocks = cell.blocks
           const inner = blocks
             .map((block) => {
               if (block.type === 'paragraph') {

@@ -35,6 +35,9 @@ export const parseHwpxFile = async (
   }
   try {
     const [text, info] = await Promise.all([reader.extractText(), reader.getDocumentInfo()])
+    if (!text || text.trim().length === 0) {
+      throw new HwpError(ErrorCode.PARSE_ERROR, 'No text content extracted from HWPX file')
+    }
     const pages = info.summary.contentsFiles.length > 0 ? info.summary.contentsFiles.length : undefined
     const metadata: HwpMetadata = {
       version: info.metadata.version ?? 'HWPX',
@@ -161,8 +164,12 @@ const extractHwpmlText = (parsed: Record<string, unknown>): { text: string; meta
       }
     }
   }
+  const text = paragraphs.join('\n')
+  if (!text || text.trim().length === 0) {
+    throw new HwpError(ErrorCode.PARSE_ERROR, 'No text content extracted from HWPML file')
+  }
   return {
-    text: paragraphs.join('\n'),
+    text,
     metadata: { version: 'HWPML', title, author, pages: undefined },
   }
 }
@@ -183,8 +190,12 @@ export const parseHwpxXmlFile = async (
   }
   const parts: string[] = []
   collectXmlText(parsed, parts)
+  const text = parts.join('\n')
+  if (!text || text.trim().length === 0) {
+    throw new HwpError(ErrorCode.PARSE_ERROR, 'No text content extracted from XML file')
+  }
   return {
-    text: parts.join('\n'),
+    text,
     metadata: { version: 'HWPX', title: undefined, author: undefined, pages: undefined },
   }
 }

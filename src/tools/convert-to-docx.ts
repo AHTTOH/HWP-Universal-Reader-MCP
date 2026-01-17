@@ -20,6 +20,7 @@ import { checkMemory } from '../utils/memory.js'
 import { ErrorCode } from '../types/index.js'
 import type { ConvertResult, DocxMetadata } from '../types/index.js'
 import { HwpError } from '../utils/error-handler.js'
+import { parseHwpxXmlFile } from '../parsers/hwpx-parser.js'
 import type { Sandbox } from '../security/sandbox.js'
 import type { RateLimiter } from '../security/rate-limiter.js'
 import { resolveInputFile } from '../utils/input-file.js'
@@ -183,6 +184,21 @@ export const handleConvertToDocx = async (
       htmlResult = await extractHwpxHtml(result.outputPath)
     } else if (fileType === 'hwpx') {
       htmlResult = await extractHwpxHtml(inputFile.path)
+    } else if (fileType === 'xml') {
+      // HWPML (XML) 파일 처리
+      const xmlResult = await parseHwpxXmlFile(inputFile.path)
+      const html = xmlResult.text
+        .split(/\r?\n/)
+        .map((line) => `<p>${escapeHtmlText(line)}</p>`)
+        .join('')
+      htmlResult = {
+        html,
+        metadata: {
+          title: xmlResult.metadata.title,
+          author: xmlResult.metadata.author,
+          pages: xmlResult.metadata.pages,
+        },
+      }
     } else {
       throw new HwpError(ErrorCode.CORRUPTED, 'Unsupported file type')
     }

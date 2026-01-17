@@ -139,7 +139,7 @@ const run = async () => {
     const port = Number(process.env.PORT ?? process.env.MCP_PORT ?? '8787')
     const handleJsonRpc = async (
       payload: unknown,
-      fallbackClientId: string,
+      defaultClientId: string,
     ): Promise<unknown | null> => {
       if (!payload || typeof payload !== 'object') {
         return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } }
@@ -156,7 +156,7 @@ const run = async () => {
       const clientId =
         typeof meta.clientId === 'string' && meta.clientId.length > 0
           ? meta.clientId
-          : fallbackClientId
+          : defaultClientId
 
       if (method === 'initialize') {
         const requestedVersion = params.protocolVersion
