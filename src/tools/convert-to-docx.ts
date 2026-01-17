@@ -21,6 +21,7 @@ import { ErrorCode } from '../types/index.js'
 import type { ConvertResult, DocxMetadata } from '../types/index.js'
 import { HwpError } from '../utils/error-handler.js'
 import { parseHwpxXmlFile } from '../parsers/hwpx-parser.js'
+import { parseHwpFile } from '../parsers/hwp-parser.js'
 import type { Sandbox } from '../security/sandbox.js'
 import type { RateLimiter } from '../security/rate-limiter.js'
 import { resolveInputFile } from '../utils/input-file.js'
@@ -121,7 +122,19 @@ const resolveBaseName = (inputPath?: string, fileName?: string, fileUrl?: string
 
 const isPlaceholderHtml = (html: string): boolean => {
   const normalized = html.replace(/\s+/g, '').toLowerCase()
-  return normalized.includes('hwpfile') || (normalized.includes('hwp') && normalized.length < 200)
+  // placeholder HTML 체크 강화
+  if (normalized.includes('hwpfile')) {
+    return true
+  }
+  if (normalized.includes('hwp') && normalized.length < 200) {
+    return true
+  }
+  // 빈 HTML이나 의미 없는 HTML 체크
+  const textContent = html.replace(/<[^>]+>/g, '').trim()
+  if (textContent.length === 0 || textContent.length < 10) {
+    return true
+  }
+  return false
 }
 
 const extractHwpxHtml = async (
@@ -171,25 +184,20 @@ export const handleConvertToDocx = async (
     let docResult: { doc: ReturnType<typeof parseHtmlToDocx>; metadata: DocxMetadata } | null =
       null
     if (fileType === 'hwp') {
-      const tempHwpx = await tempManager.createTempFile('.hwpx')
-      const converter = new HwpConverter({ verbose: false })
-      const available = await converter.isAvailable()
-      if (!available) {
-        throw new HwpError(
-          ErrorCode.CONVERSION_ERROR,
-          'HWP converter is not available. Please install required dependencies.',
-        )
+      // HWP 파일은 직접 텍스트 추출 후 HTML로 변환 (HWPX 변환 경로는 placeholder 위험)
+      const hwpResult = await parseHwpFile(inputFile.path)
+      const html = hwpResult.text
+        .split(/\r?\n/)
+        .map((line) => `<p>${escapeHtmlText(line)}</p>`)
+        .join('')
+      htmlResult = {
+        html,
+        metadata: {
+          title: hwpResult.metadata.title,
+          author: hwpResult.metadata.author,
+          pages: hwpResult.metadata.pages,
+        },
       }
-      const result = await converter.convertHwpToHwpx(inputFile.path, tempHwpx)
-      if (!result.success || !result.outputPath) {
-        const errorMsg = result.error ? String(result.error) : 'Unknown error'
-        throw new HwpError(
-          ErrorCode.CONVERSION_ERROR,
-          'Failed to convert HWP to HWPX',
-          { cause: errorMsg },
-        )
-      }
-      htmlResult = await extractHwpxHtml(result.outputPath)
     } else if (fileType === 'hwpx') {
       htmlResult = await extractHwpxHtml(inputFile.path)
     } else if (fileType === 'xml') {
